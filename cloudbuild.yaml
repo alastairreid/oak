@@ -1,0 +1,30 @@
+steps:
+  - name: 'gcr.io/cloud-builders/docker'
+    waitFor: ['-']
+    timeout: 1h
+    entrypoint: 'bash'
+    args: ['./scripts/docker_run', './scripts/check_formatting']
+  - name: 'gcr.io/cloud-builders/docker'
+    waitFor: ['-']
+    timeout: 1h
+    entrypoint: 'bash'
+    args: ['./scripts/docker_run', './scripts/build_server']
+  - name: 'gcr.io/cloud-builders/docker'
+    waitFor: ['-']
+    timeout: 1h
+    entrypoint: 'bash'
+    args: ['./scripts/docker_run', './scripts/build_dev_server']
+  - name: 'gcr.io/cloud-builders/docker'
+    waitFor: ['-']
+    timeout: 1h
+    entrypoint: 'bash'
+    args: ['./scripts/run_examples']
+  - name: 'gcr.io/cloud-builders/docker'
+    waitFor: ['-']
+    timeout: 1h
+    entrypoint: 'bash'
+    args: ['./scripts/docker_run', './scripts/run_tests']
+
+timeout: 2h
+options:
+  machineType: 'N1_HIGHCPU_8'
