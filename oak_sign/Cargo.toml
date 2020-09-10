@@ -14,6 +14,20 @@ hex = "*"
 log = "*"
 pem = "*"
 rand = "*"
-ring = "*"
+# ring = "*"
 structopt = "*"
-sha2 = "*"
+# sha2 = "*"
+
+
+[target.'cfg(verify)'.dependencies]
+propverify = { path="../../rvt/propverify" }
+sha2 = { path="../stub-sha2", package = "stub-sha2" }
+ring = { path="../stub-ring", package = "stub-ring" }
+
+[target.'cfg(not(verify))'.dependencies]
+proptest = { version = "*" }
+# sha2 = "*"
+# ring = "*"
+
+[features]
+verifier-klee = ["propverify/verifier-klee"]
