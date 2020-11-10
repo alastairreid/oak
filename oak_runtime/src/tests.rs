@@ -27,6 +27,7 @@ use oak_abi::{
     },
 };
 use std::sync::mpsc;
+use proptest::prelude::*;
 
 pub fn init_logging() {
     let _ = env_logger::builder().is_test(true).try_init();
@@ -134,6 +135,21 @@ fn test_label() -> Label {
     }
 }
 
+fn arb_tag() -> impl Strategy<Value = Tag> {
+    any::<Vec<u8>>().prop_map(|hmac| authorization_bearer_token_hmac_tag(&hmac)).boxed()
+}
+
+
+// generate an arbitrary label (with an empty integrity_tags)
+fn arb_label() -> impl Strategy<Value = Label> {
+    let ctag = arb_tag();
+    ctag.prop_map(|c|
+        Label {
+            confidentiality_tags: vec![c],
+            integrity_tags: vec![],
+        }).boxed()
+}
+
 /// Checks that a panic in the node body actually causes the test case to fail, and does not
 /// accidentally get ignored.
 #[test]
@@ -150,13 +166,13 @@ fn panic_check() {
     );
 }
 
+proptest!{
 /// Create a test Node with a non-public confidentiality label and no downgrading privilege that
 /// creates a Channel with the same label and fails.
 ///
 /// Only Nodes with a public confidentiality label may create other Nodes and Channels.
 #[test]
-fn create_channel_same_label_err() {
-    let label = test_label();
+fn create_channel_same_label_err(label in arb_label()) {
     let label_clone = label.clone();
     run_node_body(
         &label,
@@ -169,6 +185,7 @@ fn create_channel_same_label_err() {
             Ok(())
         }),
     );
+}
 }
 
 /// Create a test Node with a non-public confidentiality label and no downgrading privilege that
