@@ -27,12 +27,13 @@ use oak_abi::{
     },
 };
 use std::sync::mpsc;
+use proptest::prelude::*;
 
 pub fn init_logging() {
     let _ = env_logger::builder().is_test(true).try_init();
 }
 
-type NodeBody = dyn Fn(RuntimeProxy) -> Result<(), OakStatus> + Send + Sync;
+type NodeBody = dyn FnOnce(RuntimeProxy) -> Result<(), OakStatus> + Send + Sync;
 
 /// Runs the provided function as if it were the body of a [`Node`] implementation, which is
 /// instantiated by the [`Runtime`] with the provided [`Label`].
@@ -132,6 +133,118 @@ fn test_label() -> Label {
     }
 }
 
+fn arb_authentication_tag() -> impl Strategy<Value = Tag> {
+    any::<Vec<u8>>()
+        .prop_filter("hmacs must be non-empty", |hmac| !hmac.is_empty())
+        .prop_map(|hmac| authorization_bearer_token_hmac_tag(&hmac)).boxed()
+}
+
+fn arb_wasm_module_tag() -> impl Strategy<Value = Tag> {
+    any::<Vec<u8>>()
+        .prop_filter("shas must be non-empty", |sha| !sha.is_empty())
+        .prop_map(|sha| web_assembly_module_tag(&sha)).boxed()
+}
+
+fn arb_wasm_module_signature_tag() -> impl Strategy<Value = Tag> {
+    any::<Vec<u8>>()
+        .prop_filter("shas must be non-empty", |sha| !sha.is_empty())
+        .prop_map(|sha| web_assembly_module_signature_tag(&sha)).boxed()
+}
+
+fn arb_public_key_identity_tag() -> impl Strategy<Value = Tag> {
+    any::<Vec<u8>>()
+        .prop_filter("keys must be non-empty", |key| !key.is_empty())
+        .prop_map(|key| public_key_identity_tag(key)).boxed()
+}
+
+fn arb_tls_endpoint_tag() -> impl Strategy<Value = Tag> {
+   ".*" 
+        .prop_map(|authority| tls_endpoint_tag(&authority)).boxed()
+}
+
+fn arb_tag() -> impl Strategy<Value = Tag> {
+    prop_oneof![
+        arb_wasm_module_tag(),
+        arb_wasm_module_signature_tag(),
+        arb_authentication_tag(),
+        arb_public_key_identity_tag(),
+        arb_tls_endpoint_tag(),
+    ]
+}
+
+fn arb_tags(size: core::ops::Range<usize>) -> impl Strategy<Value = Vec<Tag>> {
+    prop::collection::vec(arb_tag(), size)
+}
+
+fn arb_label(size: core::ops::Range<usize>) -> impl Strategy<Value = Label> {
+    arb_tags(size).prop_map(|tags|
+        Label {
+            confidentiality_tags: tags,
+            integrity_tags: vec![],
+        }
+    )
+}
+
+// generate a label with an arbitrary (non-empty) list of confidentiality tags
+// and no integrity tags
+fn arb_auth_label() -> impl Strategy<Value = Label> {
+    // let ctags = prop::collection::vec(arb_authentication_tag(), 1..2); // must be non-empty
+    let ctag = arb_authentication_tag();
+    ctag.prop_map(|c|
+        Label {
+            confidentiality_tags: vec![c],
+            integrity_tags: vec![],
+        }).boxed()
+}
+
+/// generate two strictly ordered labels
+fn arb_auth_labels_ordered_2() -> impl Strategy<Value = (Label, Label)> {
+    prop_oneof![
+        // todo: check labels not ordered
+        (arb_auth_label(), arb_auth_label())
+            .prop_filter("labels not distinct", |(l1, l2)| l1 != l2) // todo: should use flowsto
+            .prop_flat_map(|(l1, l2)| {
+                let l2 = lub_label(&l1, &l2);
+                (Just(l1), Just(l2))
+            }),
+        (arb_auth_label(), Just(top_label())),
+        (Just(bottom_label()), arb_auth_label()),
+        (Just(bottom_label()), Just(top_label())),
+    ]
+}
+
+fn arb_message() -> impl Strategy<Value = NodeMessage> {
+    any::<Vec<u8>>()
+        .prop_map(|bytes|
+            NodeMessage {
+                bytes: bytes,
+                handles: vec![],
+            }
+        )
+}
+
+/// Form lub of two labels
+fn lub_label(x: &Label, y: &Label) -> Label {
+    Label {
+        confidentiality_tags: [x.confidentiality_tags.clone(), y.confidentiality_tags.clone()].concat(),
+        integrity_tags: [x.integrity_tags.clone(), y.integrity_tags.clone()].concat(),
+    }
+}
+
+fn top_label() -> Label {
+    Label {
+        confidentiality_tags: vec![top()],
+        integrity_tags: vec![],
+    }
+}
+
+fn bottom_label() -> Label {
+    Label {
+        confidentiality_tags: vec![],
+        integrity_tags: vec![],
+    }
+}
+
 /// Checks that a panic in the node body actually causes the test case to fail, and does not
 /// accidentally get ignored.
 #[test]
@@ -148,13 +261,15 @@ fn panic_check() {
     );
 }
 
+proptest!{
 /// Create a test Node with a non-public confidentiality label and no downgrading privilege that
 /// creates a Channel with the same label and fails.
 ///
 /// Only Nodes with a public confidentiality label may create other Nodes and Channels.
 #[test]
-fn create_channel_same_label_err() {
-    let label = test_label();
+fn create_channel_same_label_err(
+        label in arb_auth_label(),
+    ) {
     let label_clone = label.clone();
     run_node_body(
         &label,
@@ -168,23 +283,18 @@ fn create_channel_same_label_err() {
         }),
     );
 }
+}
 
+proptest!{
 /// Create a test Node with a non-public confidentiality label and no downgrading privilege that
 /// creates a Channel with a less confidential label and fails.
 ///
 /// Only Nodes with a public confidentiality label may create other Nodes and Channels.
 #[test]
-fn create_channel_less_confidential_label_err() {
-    let tag_0 = oak_abi::label::authorization_bearer_token_hmac_tag(&[1, 1, 1]);
-    let tag_1 = oak_abi::label::authorization_bearer_token_hmac_tag(&[2, 2, 2]);
-    let initial_label = Label {
-        confidentiality_tags: vec![tag_0, tag_1.clone()],
-        integrity_tags: vec![],
-    };
-    let less_confidential_label = Label {
-        confidentiality_tags: vec![tag_1],
-        integrity_tags: vec![],
-    };
+fn create_channel_less_confidential_label_err(
+        (less_confidential_label, more_confidential_label) in arb_auth_labels_ordered_2(),
+    ) {
+    let initial_label = more_confidential_label;
     run_node_body(
         &initial_label,
         &NodePrivilege::default(),
@@ -195,16 +305,19 @@ fn create_channel_less_confidential_label_err() {
         }),
     );
 }
+}
 
+proptest!{
 /// Create a test Node with a non-public confidentiality label and some downgrading privilege that
 /// creates a Channel with a less confidential label and fails.
 ///
 /// Only Nodes with a public confidentiality label may create other Nodes and Channels.
 #[test]
-fn create_channel_less_confidential_label_declassification_err() {
-    let tag_0 = oak_abi::label::authorization_bearer_token_hmac_tag(&[1, 1, 1]);
-    let tag_1 = oak_abi::label::authorization_bearer_token_hmac_tag(&[2, 2, 2]);
-    let other_tag = oak_abi::label::authorization_bearer_token_hmac_tag(&[3, 3, 3]);
+fn create_channel_less_confidential_label_declassification_err(
+        tag_0 in arb_authentication_tag(),
+        tag_1 in arb_authentication_tag(),
+        other_tag in arb_authentication_tag(), // todo: probably != tag_0/1
+    ) {
     let initial_label = Label {
         confidentiality_tags: vec![tag_0.clone(), tag_1.clone()],
         integrity_tags: vec![],
@@ -228,23 +341,32 @@ fn create_channel_less_confidential_label_declassification_err() {
         }),
     );
 }
+}
 
+// Note: I suspect that error tests in general are like this test (and others
+// in this file) in that the test will fail only if two values are the same.
+// This is a poor match for blind fuzzing because random 64-bit values are
+// really unlikely to collide.
+// One way to fix this would be to have a small number of example values that
+// are selected with very high probability.
+proptest!{
 /// Create a test Node with a non-public confidentiality label that creates a Channel with a less
 /// confidential label and fails.
 ///
 /// Only Nodes with a public confidentiality label may create other Nodes and Channels.
 #[test]
-fn create_channel_less_confidential_label_no_privilege_err() {
-    let tag_0 = oak_abi::label::authorization_bearer_token_hmac_tag(&[1, 1, 1]);
-    let tag_1 = oak_abi::label::authorization_bearer_token_hmac_tag(&[2, 2, 2]);
-    let initial_label = Label {
-        confidentiality_tags: vec![tag_0.clone(), tag_1.clone()],
-        integrity_tags: vec![],
-    };
-    let less_confidential_label = Label {
-        confidentiality_tags: vec![tag_1],
-        integrity_tags: vec![],
-    };
+fn create_channel_less_confidential_label_no_privilege_err(
+        tag_0 in arb_authentication_tag(),
+        label_1 in arb_auth_label(),
+    ) {
+    prop_assume!(!label_1.confidentiality_tags.contains(&tag_0));
+    // todo: it would be better to use two arbitrary labels instead of two arbitrary tags?
+    // todo: should use an arbitrary set of integrity tags
+    let initial_label = lub_label(&label_1, &Label {
+            confidentiality_tags: vec![tag_0.clone()],
+            integrity_tags: vec![],
+        });
+    let less_confidential_label = label_1;
     run_node_body(
         &initial_label,
         // Grant this node the privilege to endorse (rather than declassify) `tag_0`, which in this
@@ -260,7 +382,9 @@ fn create_channel_less_confidential_label_no_privilege_err() {
         }),
     );
 }
+}
 
+proptest!{
 /// Create a test Node with public confidentiality label and no privilege that:
 ///
 /// - creates a Channel with a more confidential label and succeeds
@@ -269,13 +393,13 @@ fn create_channel_less_confidential_label_no_privilege_err() {
 ///
 /// Data is always allowed to flow to more confidential labels.
 #[test]
-fn create_channel_with_more_confidential_label_from_public_untrusted_node_ok() {
-    let tag_0 = oak_abi::label::authorization_bearer_token_hmac_tag(&[1, 1, 1]);
+fn create_channel_with_more_confidential_label_from_public_untrusted_node_ok(
+        label_0 in arb_auth_label(),
+        message in arb_message(),
+    ) {
+    // todo: better to generate a pair of arbitrary labels than just a tag
     let initial_label = &Label::public_untrusted();
-    let more_confidential_label = Label {
-        confidentiality_tags: vec![tag_0],
-        integrity_tags: vec![],
-    };
+    let more_confidential_label = label_0;
     run_node_body(
         &initial_label,
         &NodePrivilege::default(),
@@ -284,11 +408,6 @@ fn create_channel_with_more_confidential_label_from_public_untrusted_node_ok() {
             assert_eq!(true, result.is_ok());
 
             let (write_handle, read_handle) = result.unwrap();
-
-            let message = NodeMessage {
-                bytes: vec![14, 12, 88],
-                handles: vec![],
-            };
 
             {
                 // Writing to a more confidential Channel is always allowed.
@@ -306,7 +425,9 @@ fn create_channel_with_more_confidential_label_from_public_untrusted_node_ok() {
         }),
     );
 }
+}
 
+proptest!{
 /// Create a test Node with public confidentiality label and downgrading privilege that:
 ///
 /// - creates a Channel with a more confidential label and succeeds (same as previous test case)
@@ -315,7 +436,11 @@ fn create_channel_with_more_confidential_label_from_public_untrusted_node_ok() {
 ///   to the newly added privilege)
 #[test]
 fn create_channel_with_more_confidential_label_from_public_node_with_downgrade_ok() {
-    let tag_0 = oak_abi::label::authorization_bearer_token_hmac_tag(&[1, 1, 1]);
+        // todo: better to create a pair of labels? but we need to refer to the tag in 
+        // NodePrivilege - so not completely trivial.
+        tag_0 in arb_authentication_tag(),
+        message in arb_message(),
+    ) {
     let initial_label = Label::public_untrusted();
     let more_confidential_label = Label {
         confidentiality_tags: vec![tag_0.clone()],
@@ -333,11 +458,6 @@ fn create_channel_with_more_confidential_label_from_public_node_with_downgrade_o
 
             let (write_handle, read_handle) = result.unwrap();
 
-            let message = NodeMessage {
-                bytes: vec![14, 12, 88],
-                handles: vec![],
-            };
-
             {
                 // Writing to a more confidential Channel is always allowed.
                 let result = runtime.channel_write(write_handle, message.clone());
@@ -354,7 +474,9 @@ fn create_channel_with_more_confidential_label_from_public_node_with_downgrade_o
         }),
     );
 }
+}
 
+proptest!{
 /// Create a test Node with public confidentiality label and infinite privilege that:
 ///
 /// - creates a Channel with a more confidential label and succeeds (same as previous test case)
@@ -362,13 +484,13 @@ fn create_channel_with_more_confidential_label_from_public_node_with_downgrade_o
 /// - reads from the newly created channel and succeeds (same as previous test case, this time
 ///   thanks to the infinite privilege)
 #[test]
-fn create_channel_with_more_confidential_label_from_public_node_with_top_privilege_ok() {
-    let tag_0 = oak_abi::label::authorization_bearer_token_hmac_tag(&[1, 1, 1]);
+fn create_channel_with_more_confidential_label_from_public_node_with_top_privilege_ok(
+        // todo: better to create a pair of labels? but we need to refer to the tag in 
+        // NodePrivilege - so not completely trivial.
+        more_confidential_label in arb_label(1..2),
+        message in arb_message(),
+    ) {
     let initial_label = Label::public_untrusted();
-    let more_confidential_label = Label {
-        confidentiality_tags: vec![tag_0],
-        integrity_tags: vec![],
-    };
     run_node_body(
         &initial_label,
         &NodePrivilege::top_privilege(),
@@ -378,11 +500,6 @@ fn create_channel_with_more_confidential_label_from_public_node_with_top_privile
 
             let (write_handle, read_handle) = result.unwrap();
 
-            let message = NodeMessage {
-                bytes: vec![14, 12, 88],
-                handles: vec![],
-            };
-
             {
                 // Writing to a more confidential Channel is always allowed.
                 let result = runtime.channel_write(write_handle, message.clone());
@@ -399,11 +516,15 @@ fn create_channel_with_more_confidential_label_from_public_node_with_top_privile
         }),
     );
 }
+}
 
+proptest!{
 #[test]
 fn create_channel_with_more_confidential_label_from_non_public_node_with_downgrade_err() {
-    let tag_0 = oak_abi::label::authorization_bearer_token_hmac_tag(&[1, 1, 1]);
-    let tag_1 = oak_abi::label::authorization_bearer_token_hmac_tag(&[2, 2, 2]);
+        tag_0 in arb_authentication_tag(),
+        tag_1 in arb_authentication_tag(),
+    ) {
+    prop_assume!(tag_0 != tag_1);
     let initial_label = Label {
         confidentiality_tags: vec![tag_0.clone()],
         integrity_tags: vec![],
@@ -424,6 +545,7 @@ fn create_channel_with_more_confidential_label_from_non_public_node_with_downgra
             Ok(())
         }),
     );
+}
 }
 
 /// Create a test Node that creates a Node with the same public untrusted label and succeeds.
@@ -467,24 +589,21 @@ fn create_node_invalid_configuration_err() {
     );
 }
 
+proptest!{
 /// Create a test Node with a non public_trusted label, which is then unable to create channels
 /// of any sort, regardless of label.
 #[test]
-fn create_channel_by_nonpublic_node_err() {
-    let tag_0 = oak_abi::label::authorization_bearer_token_hmac_tag(&[1, 1, 1]);
-    let tag_1 = oak_abi::label::authorization_bearer_token_hmac_tag(&[2, 2, 2]);
-    let initial_label = Label {
-        confidentiality_tags: vec![tag_0.clone()],
-        integrity_tags: vec![],
-    };
-    let less_confidential_label = Label {
-        confidentiality_tags: vec![],
-        integrity_tags: vec![],
-    };
-    let more_confidential_label = Label {
-        confidentiality_tags: vec![tag_0, tag_1],
-        integrity_tags: vec![],
-    };
+fn create_channel_by_nonpublic_node_err(
+        label_0 in arb_auth_label(),
+        label_1 in arb_auth_label(),
+    ) {
+    prop_assume!(label_0 != label_1); // todo: test using flowsto
+    // todo: this can be reduced to a single test: for any pair l1, l2, chan_create(l2) fails
+    // but, in doing so, need a non-trivial chance that second label matches first
+    // and that either of the labels can be top or bottom
+    let less_confidential_label = bottom_label();
+    let more_confidential_label = lub_label(&label_0, &label_1);
+    let initial_label = label_0;
     let initial_label_clone = initial_label.clone();
     run_node_body(
         &initial_label,
@@ -500,22 +619,20 @@ fn create_channel_by_nonpublic_node_err() {
         }),
     );
 }
+}
 
+proptest!{
 /// Create a public_untrusted test Node that creates a Node with a more confidential label and
 /// succeeds.
+///
+/// todo: it is not clear whether it matters that the second node has a higher label
+/// or whether any arbitrary label should work provided they are all no lower than initial_label
 #[test]
-fn create_node_more_confidential_label_ok() {
-    let tag_0 = oak_abi::label::authorization_bearer_token_hmac_tag(&[1, 1, 1]);
-    let tag_1 = oak_abi::label::authorization_bearer_token_hmac_tag(&[2, 2, 2]);
+fn create_node_more_confidential_label_ok(
+        (more_confidential_label, even_more_confidential_label) in arb_auth_labels_ordered_2(),
+    ) {
+    prop_assume!(more_confidential_label != Label::public_untrusted()); // todo: test using flowsto
     let initial_label = Label::public_untrusted();
-    let more_confidential_label = Label {
-        confidentiality_tags: vec![tag_0.clone()],
-        integrity_tags: vec![],
-    };
-    let even_more_confidential_label = Label {
-        confidentiality_tags: vec![tag_0, tag_1],
-        integrity_tags: vec![],
-    };
     let initial_label_clone = initial_label.clone();
     run_node_body(
         &initial_label,
@@ -524,6 +641,7 @@ fn create_node_more_confidential_label_ok() {
             let (_write_handle, read_handle) = runtime.channel_create("", &initial_label_clone)?;
             let node_configuration = NodeConfiguration {
                 config_type: Some(ConfigType::GrpcServerConfig(GrpcServerConfiguration {
+                    // todo: can/should we generalize this hardcoded string?
                     address: "[::]:6502".to_string(),
                 })),
             };
@@ -545,7 +663,12 @@ fn create_node_more_confidential_label_ok() {
         }),
     );
 }
+}
 
+// todo: what is the right way to generalize this?
+// perhaps generate a sequence of N channel creates
+// and a sequence of N bools to close them
+// and then check that only the closed ones are Orphaned
 #[test]
 fn wait_on_channels_immediately_returns_if_any_channel_is_orphaned() {
     let label = Label::public_untrusted();
@@ -642,59 +765,43 @@ fn wait_on_channels_immediately_returns_if_the_input_list_is_empty() {
     );
 }
 
+proptest!{
 #[test]
-fn downgrade_multiple_labels_using_top_privilege() {
+/// The top privilege can downgrade any label to "public".
+fn downgrade_one_label_using_top_privilege(
+        label in arb_tag().prop_map(confidentiality_label),
+    ) {
     init_logging();
-    let top_privilege = NodePrivilege::top_privilege();
 
-    let wasm_tag = web_assembly_module_tag(&[1, 2, 3]);
-    let signature_tag = web_assembly_module_signature_tag(&[1, 2, 3]);
-    let bearer_token_tag = authorization_bearer_token_hmac_tag(&[1, 2, 3]);
-    let public_key_identity_tag = public_key_identity_tag(vec![1, 2, 3]);
-    let tls_endpoint_tag = tls_endpoint_tag("google.com");
+    assert!(NodePrivilege::top_privilege()
+        .downgrade_label(&label)
+        .flows_to(&Label::public_untrusted()));
+}
+}
 
-    let wasm_label = confidentiality_label(wasm_tag.clone());
-    let signature_label = confidentiality_label(signature_tag.clone());
-    let bearer_token_label = confidentiality_label(bearer_token_tag.clone());
-    let public_key_identity_label = confidentiality_label(public_key_identity_tag.clone());
-    let tls_endpoint_label = confidentiality_label(tls_endpoint_tag.clone());
-    let mixed_label = Label {
-        confidentiality_tags: vec![
-            wasm_tag,
-            signature_tag,
-            bearer_token_tag,
-            public_key_identity_tag,
-            tls_endpoint_tag,
-        ],
-        integrity_tags: vec![],
-    };
-
-    // The top privilege can downgrade any label to "public".
-    assert!(top_privilege
-        .downgrade_label(&wasm_label)
-        .flows_to(&Label::public_untrusted()));
-    assert!(top_privilege
-        .downgrade_label(&signature_label)
-        .flows_to(&Label::public_untrusted()));
-    assert!(top_privilege
-        .downgrade_label(&bearer_token_label)
-        .flows_to(&Label::public_untrusted()));
-    assert!(top_privilege
-        .downgrade_label(&public_key_identity_label)
-        .flows_to(&Label::public_untrusted()));
-    assert!(top_privilege
-        .downgrade_label(&tls_endpoint_label)
-        .flows_to(&Label::public_untrusted()));
-    assert!(top_privilege
+proptest!{
+#[test]
+/// The top privilege can downgrade any label to "public".
+fn downgrade_multiple_labels_using_top_privilege(
+        mixed_label in arb_label(0..10),
+    ) {
+    init_logging();
+    assert!(NodePrivilege::top_privilege()
         .downgrade_label(&mixed_label)
         .flows_to(&Label::public_untrusted()));
 }
+}
 
+proptest!{
 #[test]
-fn downgrade_tls_label_using_tls_privilege() {
+/// todo: should this test be used on any pair of tags or only for TLS endpoint tags?
+/// todo: should this test be applied to arbitrary labels (not just labels based on individual tags)?
+fn downgrade_tls_label_using_tls_privilege(
+        tls_endpoint_tag_1 in arb_tls_endpoint_tag(),
+        tls_endpoint_tag_2 in arb_tls_endpoint_tag(),
+    ) {
+    prop_assume!(tls_endpoint_tag_1 != tls_endpoint_tag_2);
     init_logging();
-    let tls_endpoint_tag_1 = tls_endpoint_tag("google.com");
-    let tls_endpoint_tag_2 = tls_endpoint_tag("localhost");
     let tls_privilege = NodePrivilege {
         can_declassify_confidentiality_tags: hashset! { tls_endpoint_tag_1.clone() },
         can_endorse_integrity_tags: hashset! {},
@@ -702,10 +809,7 @@ fn downgrade_tls_label_using_tls_privilege() {
 
     let tls_endpoint_label_1 = confidentiality_label(tls_endpoint_tag_1.clone());
     let tls_endpoint_label_2 = confidentiality_label(tls_endpoint_tag_2.clone());
-    let mixed_tls_endpoint_label = Label {
-        confidentiality_tags: vec![tls_endpoint_tag_1, tls_endpoint_tag_2],
-        integrity_tags: vec![],
-    };
+    let mixed_tls_endpoint_label = lub_label(&tls_endpoint_label_1, &tls_endpoint_label_2);
 
     // Can downgrade the label with the same TLS endpoint tag.
     assert!(tls_privilege
@@ -723,21 +827,23 @@ fn downgrade_tls_label_using_tls_privilege() {
         .downgrade_label(&mixed_tls_endpoint_label)
         .flows_to(&tls_endpoint_label_1));
 }
+}
 
+proptest!{
 #[test]
-fn downgrade_wasm_label_using_signature_privilege_does_not_do_aything() {
+fn downgrade_wasm_label_using_signature_privilege_does_not_do_anything(
+        signature_tag in arb_wasm_module_signature_tag(),
+        wasm_label in arb_wasm_module_tag().prop_map(confidentiality_label),
+    ) {
     init_logging();
-    let signature_tag = web_assembly_module_signature_tag(&[1, 2, 3]);
     let signature_privilege = NodePrivilege {
         can_declassify_confidentiality_tags: hashset! { signature_tag },
         can_endorse_integrity_tags: hashset! {},
     };
 
-    let wasm_tag = web_assembly_module_tag(&[1, 2, 3]);
-    let wasm_label = confidentiality_label(wasm_tag);
-
     // Signature privilege cannot downgrade a Wasm confidentiality label.
     assert!(!signature_privilege
         .downgrade_label(&wasm_label)
         .flows_to(&Label::public_untrusted()));
+}
 }

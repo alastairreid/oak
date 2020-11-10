@@ -41,6 +41,8 @@ oak_sign = { path = "../oak_sign" }
 prometheus = { version = "0.10", features = [
   "nightly"
 ], default-features = false }
+proptest = "0.10.1"
+proptest-derive = "0.2.0"
 prost = { path = "../third_party/prost" }
 prost-types = { path = "../third_party/prost/prost-types" }
 rand = "*"

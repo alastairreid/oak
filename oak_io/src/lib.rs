@@ -32,6 +32,8 @@ pub use oak_abi::{Handle, OakStatus};
 pub use receiver::Receiver;
 pub use sender::Sender;
 
+use proptest_derive::Arbitrary;
+
 /// A simple holder for bytes + handles, using internally owned buffers.
 #[derive(Clone, PartialEq, Eq)]
 pub struct Message {
@@ -97,7 +99,7 @@ impl<L: Decodable, R: Decodable> Decodable for Either<L, R> {
 /// command messages. This is useful for patterns in which an Oak node needs some data at
 /// initialization time, but then handles commands of a different type and possibly coming from a
 /// different channel, to be processed in an event-loop pattern.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Arbitrary, Clone, Debug, PartialEq)]
 pub struct InitWrapper<Init, Command: Decodable> {
     pub init: Init,
     pub command_receiver: Receiver<Command>,
@@ -142,7 +144,9 @@ mod tests {
     use super::*;
     use assert_matches::assert_matches;
 
-    #[derive(Debug, PartialEq)]
+    use proptest::prelude::*;
+
+    #[derive(Arbitrary, Debug, PartialEq)]
     struct TestStruct {
         receiver_0: Receiver<()>,
         field_0: u8,
@@ -172,119 +176,87 @@ mod tests {
         }
     }
 
+    proptest!{
     #[test]
-    fn test_struct_round_trip() {
-        let original = TestStruct {
-            receiver_0: Receiver::from(ReadHandle::from(100)),
-            field_0: 10,
-            receiver_1: Receiver::from(ReadHandle::from(101)),
-            field_1: 11,
-        };
+    fn test_struct_round_trip(original: TestStruct) {
         let encoded = original.encode().unwrap();
+        // It is not clear that this assertion adds any value at all since it is so similar
+        // to the definition of encode::<TestStruct>
         assert_eq!(
             Message {
-                bytes: vec![10, 11],
-                handles: vec![100, 101],
+                bytes: vec![original.field_0, original.field_1],
+                handles: vec![original.receiver_0.handle.handle, original.receiver_1.handle.handle],
             },
             encoded
         );
         let decoded = TestStruct::decode(&encoded).unwrap();
         assert_eq!(original, decoded);
+        // todo: should there round-trip take one further step to check that 
+        //     encode(decode(encode(original))) == encode(original)
+        // alternatively, should there be a second test that (forall x. encode(decode(x)) == x)
+    }
     }
 
-    #[test]
-    fn either_round_trip() {
-        type T = Either<u32, TestStruct>;
+    type T = Either<u32, TestStruct>;
 
-        {
-            // This test case is just a baseline reference for the ones below, to spell out the
-            // protobuf encoding of the inner object.
-            let original = 1988;
-            let encoded = original.encode().unwrap();
-            assert_eq!(
-                Message {
-                    bytes: vec![8, 196, 15],
-                    handles: vec![],
-                },
-                encoded
-            );
-            let decoded = u32::decode(&encoded).unwrap();
-            assert_eq!(original, decoded);
-        }
+    // generate an arbitrary value of type T
+    fn arb_t() -> impl Strategy<Value = T> {
+        prop_oneof![
+            any::<u32>().prop_map(Either::Left),
+            any::<TestStruct>().prop_map(Either::Right),
+        ].boxed()
+    }
 
-        {
-            let original = T::Left(1988);
-            let encoded = original.encode().unwrap();
-            // Note the first byte corresponds to the variant == 0.
-            assert_eq!(
-                Message {
-                    bytes: vec![0, 8, 196, 15],
-                    handles: vec![],
-                },
-                encoded
-            );
-            let decoded = T::decode(&encoded).unwrap();
-            assert_eq!(original, decoded);
-        }
-
-        {
-            let original = T::Right(TestStruct {
-                receiver_0: Receiver::from(ReadHandle::from(100)),
-                field_0: 10,
-                receiver_1: Receiver::from(ReadHandle::from(101)),
-                field_1: 11,
-            });
-            let encoded = original.encode().unwrap();
-            // Note the first byte corresponds to the variant == 1.
-            assert_eq!(
-                Message {
-                    bytes: vec![1, 10, 11],
-                    handles: vec![100, 101],
-                },
-                encoded
-            );
-            let decoded = T::decode(&encoded).unwrap();
-            assert_eq!(original, decoded);
-        }
-
-        {
-            let invalid_variant = 42;
-            let encoded_invalid = Message {
-                bytes: vec![invalid_variant, 8, 196, 15],
-                handles: vec![],
-            };
-            assert_matches!(
-                T::decode(&encoded_invalid),
-                Err(OakError::OakStatus(OakStatus::ErrInvalidArgs))
-            );
+    proptest!{
+        #[test]
+        fn either_round_trip_u32(original: u32) {
+            {
+                let encoded = original.encode().unwrap();
+                // omitted: check that the encoding is as expected
+                let decoded = u32::decode(&encoded).unwrap();
+                assert_eq!(original, decoded);
+            }
         }
     }
 
-    #[test]
-    fn init_wrapper_round_trip() {
-        type T = InitWrapper<TestStruct, ()>;
+    proptest!{
+        #[test]
+        fn either_round_trip_t(original in arb_t()) {
+            {
+                let encoded = original.encode().unwrap();
+                // omitted: check that the encoding is as expected
+                let decoded = T::decode(&encoded).unwrap();
+                assert_eq!(original, decoded);
+            }
+        }
+    }
 
-        {
-            let original = T {
-                init: TestStruct {
-                    receiver_0: Receiver::from(ReadHandle::from(100)),
-                    field_0: 10,
-                    receiver_1: Receiver::from(ReadHandle::from(101)),
-                    field_1: 11,
-                },
-                command_receiver: Receiver::from(ReadHandle::from(123)),
-            };
-            let encoded = original.encode().unwrap();
-            // Note the handle list contains the command receiver handle at the beginning.
-            assert_eq!(
-                Message {
-                    bytes: vec![10, 11],
-                    handles: vec![123, 100, 101],
-                },
-                encoded
-            );
-            let decoded = T::decode(&encoded).unwrap();
-            assert_eq!(original, decoded);
+    // todo: it is not clear how best to generalize this original test
+    // Maybe it is good enough as it is?
+    #[test]
+    fn either_round_trip_invalid() {
+        let invalid_variant = 42;
+        let encoded_invalid = Message {
+            bytes: vec![invalid_variant, 8, 196, 15],
+            handles: vec![],
+        };
+        assert_matches!(
+            T::decode(&encoded_invalid),
+            Err(OakError::OakStatus(OakStatus::ErrInvalidArgs))
+        );
+    }
+
+    type I = InitWrapper<TestStruct, ()>;
+
+    proptest!{
+        #[test]
+        fn init_wrapper_round_trip(original: I) {
+            {
+                let encoded = original.encode().unwrap();
+                // omitted: check that encoding is as expected
+                let decoded = I::decode(&encoded).unwrap();
+                assert_eq!(original, decoded);
+            }
         }
     }
 }

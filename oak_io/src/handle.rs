@@ -18,11 +18,12 @@ include!(concat!(env!("OUT_DIR"), "/oak.handle.rs"));
 use crate::OakError;
 use log::error;
 use oak_abi::Handle;
+use proptest_derive::Arbitrary;
 
 /// Wrapper for a handle to the read half of a channel.
 ///
 /// For use when the underlying [`Handle`] is known to be for a receive half.
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Arbitrary, Copy, Clone, PartialEq)]
 pub struct ReadHandle {
     pub handle: Handle,
 }

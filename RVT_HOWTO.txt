@@ -1,0 +1,6 @@
+# If using this directory with RVT, be sure to install protoc before
+# using cargo-verify.
+
+curl --location https://github.com/protocolbuffers/protobuf/releases/download/v3.13.0/protoc-3.13.0-linux-x86_64.zip > /tmp/protobuf.zip
+unzip /tmp/protobuf.zip -d /tmp/protobuf
+export PATH=$PATH:/tmp/protobuf/bin

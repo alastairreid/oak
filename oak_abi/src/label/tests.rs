@@ -15,50 +15,45 @@
 //
 
 use super::*;
+#[cfg(not(verify))]
+use proptest::prelude::*;
+#[cfg(verify)]
+use propverify::prelude::*;
 
-#[test]
-fn serialize_deserialize() {
-    let labels = vec![
-        Label {
-            confidentiality_tags: vec![],
-            integrity_tags: vec![],
-        },
-        Label {
-            confidentiality_tags: vec![authorization_bearer_token_hmac_tag(&[0, 0, 0])],
-            integrity_tags: vec![authorization_bearer_token_hmac_tag(&[1, 1, 1])],
-        },
-        Label {
-            confidentiality_tags: vec![
-                authorization_bearer_token_hmac_tag(&[0, 0, 0]),
-                authorization_bearer_token_hmac_tag(&[0, 0, 0]),
-            ],
-            integrity_tags: vec![
-                authorization_bearer_token_hmac_tag(&[1, 1, 1]),
-                authorization_bearer_token_hmac_tag(&[1, 1, 1]),
-            ],
-        },
-        Label {
-            confidentiality_tags: vec![
-                authorization_bearer_token_hmac_tag(&[0, 0, 0]),
-                authorization_bearer_token_hmac_tag(&[1, 1, 1]),
-            ],
-            integrity_tags: vec![
-                authorization_bearer_token_hmac_tag(&[2, 2, 2]),
-                authorization_bearer_token_hmac_tag(&[3, 3, 3]),
-            ],
-        },
-    ];
-    for label in labels.iter() {
+fn arb_hmac() -> impl Strategy<Value = Vec<u8>> {
+    prop::collection::vec(any::<u8>(), 5)
+        .prop_filter("hmacs must be non-empty", |hmac| !hmac.is_empty())
+}
+
+// todo: should probably vary number of hmacs from 0 upwards
+fn arb_hmacs() -> impl Strategy<Value = Vec<Vec<u8>>> {
+    prop::collection::vec(arb_hmac(), 3)
+}
+
+proptest! {
+    #[test]
+    fn serialize_deserialize(c_hmacs in arb_hmacs(),
+                             i_hmacs in arb_hmacs(),
+        ) {
+        let ctags = c_hmacs.into_iter().map(|hmac| authorization_bearer_token_hmac_tag(&hmac)).collect();
+        let itags = i_hmacs.into_iter().map(|hmac| authorization_bearer_token_hmac_tag(&hmac)).collect();
+        let label = Label {
+            confidentiality_tags: ctags,
+            integrity_tags: itags,
+        };
         let bytes = label.serialize();
         let deserialized = Label::deserialize(&bytes).unwrap();
-        assert_eq!(*label, deserialized);
+        assert_eq!(label, deserialized);
     }
 }
 
-#[test]
-fn label_flow() {
-    let tag_0 = authorization_bearer_token_hmac_tag(&[0, 0, 0]);
-    let tag_1 = authorization_bearer_token_hmac_tag(&[1, 1, 1]);
+proptest! {
+  #[test]
+  fn label_flow(hmac_0 in arb_hmac(),
+                hmac_1 in arb_hmac(),
+      ) {
+    let tag_0 = authorization_bearer_token_hmac_tag(&hmac_0);
+    let tag_1 = authorization_bearer_token_hmac_tag(&hmac_1);
 
     let public_untrusted = Label::public_untrusted();
 
@@ -136,4 +131,5 @@ fn label_flow() {
     // And vice versa.
     assert_eq!(false, label_0_1.flows_to(&label_0));
     assert_eq!(false, label_0_1.flows_to(&label_1));
+  }
 }

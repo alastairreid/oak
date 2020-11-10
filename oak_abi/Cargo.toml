@@ -11,6 +11,8 @@ license = "Apache-2.0"
 prost = { path = "../third_party/prost" }
 prost-types = { path = "../third_party/prost/prost-types" }
 serde = { version = "*", features = ["derive"] }
+proptest = "0.10.1"
+proptest-derive = "0.2.0"
 
 [build-dependencies]
 oak_utils = { path = "../oak_utils" }
@@ -21,3 +23,13 @@ prost = { path = "../third_party/prost" }
 prost-build = { path = "../third_party/prost/prost-build" }
 prost-derive = { path = "../third_party/prost/prost-derive" }
 prost-types = { path = "../third_party/prost/prost-types" }
+
+[target.'cfg(verify)'.dependencies]
+propverify = { path="/home/rust-verification-tools/propverify" }
+
+[target.'cfg(not(verify))'.dependencies]
+proptest = { version = "*" }
+
+[features]
+verifier-klee = ["propverify/verifier-klee"]
+verifier-crux = ["propverify/verifier-crux"]
