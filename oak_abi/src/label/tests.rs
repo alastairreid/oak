@@ -33,10 +33,12 @@ proptest! {
     }
 }
 
-#[test]
-fn label_flow() {
-    let tag_0 = authorization_bearer_token_hmac_tag(&[0, 0, 0]);
-    let tag_1 = authorization_bearer_token_hmac_tag(&[1, 1, 1]);
+proptest! {
+  #[test]
+  fn label_flow(hmac_0 in any::<Vec<u8>>(),
+                hmac_1 in any::<Vec<u8>>()) {
+    let tag_0 = authorization_bearer_token_hmac_tag(&hmac_0);
+    let tag_1 = authorization_bearer_token_hmac_tag(&hmac_1);
 
     let public_untrusted = Label::public_untrusted();
 
@@ -114,4 +116,5 @@ fn label_flow() {
     // And vice versa.
     assert_eq!(false, label_0_1.flows_to(&label_0));
     assert_eq!(false, label_0_1.flows_to(&label_1));
+  }
 }
