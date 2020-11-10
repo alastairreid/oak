@@ -140,8 +140,10 @@ fn arb_tag() -> impl Strategy<Value = Tag> {
 }
 
 
-// generate an arbitrary label (with an empty integrity_tags)
+// generate a label with an arbitrary (non-empty) list of confidentiality tags
+// and no integrity tags
 fn arb_label() -> impl Strategy<Value = Label> {
+    // let ctags = prop::collection::vec(arb_tag(), 1..2); // must be non-empty
     let ctag = arb_tag();
     ctag.prop_map(|c|
         Label {
@@ -166,13 +168,15 @@ fn panic_check() {
     );
 }
 
-proptest!{
+// proptest!{
 /// Create a test Node with a non-public confidentiality label and no downgrading privilege that
 /// creates a Channel with the same label and fails.
 ///
 /// Only Nodes with a public confidentiality label may create other Nodes and Channels.
 #[test]
-fn create_channel_same_label_err(label in arb_label()) {
+// fn create_channel_same_label_err(label in arb_label()) {
+fn create_channel_same_label_err() {
+    let label = test_label();
     let label_clone = label.clone();
     run_node_body(
         &label,
@@ -186,7 +190,7 @@ fn create_channel_same_label_err(label in arb_label()) {
         }),
     );
 }
-}
+// }
 
 /// Create a test Node with a non-public confidentiality label and no downgrading privilege that
 /// creates a Channel with a less confidential label and fails.
