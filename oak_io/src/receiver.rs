@@ -19,6 +19,7 @@ use prost::{
     bytes::{Buf, BufMut},
     encoding::{DecodeContext, WireType},
 };
+use proptest_derive::Arbitrary;
 
 /// Wrapper for a handle to the read half of a channel, allowing to receive data that can be decoded
 /// as bytes + handles via the `Decodable` trait.
@@ -26,7 +27,7 @@ use prost::{
 /// For use when the underlying [`Handle`] is known to be for a receive half.
 ///
 /// [`Handle`]: crate::Handle
-#[derive(Copy, Clone, PartialEq)]
+#[derive(Arbitrary, Copy, Clone, PartialEq)]
 pub struct Receiver<T: Decodable> {
     pub handle: ReadHandle,
     phantom: std::marker::PhantomData<T>,
