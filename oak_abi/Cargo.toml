@@ -11,7 +11,8 @@ license = "Apache-2.0"
 prost = { path = "../third_party/prost" }
 prost-types = { path = "../third_party/prost/prost-types" }
 serde = { version = "*", features = ["derive"] }
-proptest = "0.10"
+proptest = "0.10.1"
+proptest-derive = "0.2.0"
 
 [build-dependencies]
 oak_utils = { path = "../oak_utils" }
