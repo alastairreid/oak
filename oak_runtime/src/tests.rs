@@ -33,7 +33,7 @@ pub fn init_logging() {
     let _ = env_logger::builder().is_test(true).try_init();
 }
 
-type NodeBody = dyn Fn(RuntimeProxy) -> Result<(), OakStatus> + Send + Sync;
+type NodeBody = dyn FnOnce(RuntimeProxy) -> Result<(), OakStatus> + Send + Sync;
 
 /// Runs the provided function as if it were the body of a [`Node`] implementation, which is
 /// instantiated by the [`Runtime`] with the provided [`Label`].
