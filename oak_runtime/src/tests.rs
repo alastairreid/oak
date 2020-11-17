@@ -310,7 +310,9 @@ proptest!{
 #[test]
 fn create_channel_with_more_confidential_label_from_public_untrusted_node_ok(
         tag_0 in arb_tag(),
+        bytes in any::<Vec<u8>>(),
     ) {
+    // todo: better to generate a pair of arbitrary labels than just a tag
     let initial_label = &Label::public_untrusted();
     let more_confidential_label = Label {
         confidentiality_tags: vec![tag_0],
@@ -326,7 +328,7 @@ fn create_channel_with_more_confidential_label_from_public_untrusted_node_ok(
             let (write_handle, read_handle) = result.unwrap();
 
             let message = NodeMessage {
-                bytes: vec![14, 12, 88],
+                bytes: bytes,
                 handles: vec![],
             };
 
