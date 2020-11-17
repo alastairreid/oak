@@ -350,6 +350,7 @@ fn create_channel_with_more_confidential_label_from_public_untrusted_node_ok(
 }
 }
 
+proptest!{
 /// Create a test Node with public confidentiality label and downgrading privilege that:
 ///
 /// - creates a Channel with a more confidential label and succeeds (same as previous test case)
@@ -357,8 +358,12 @@ fn create_channel_with_more_confidential_label_from_public_untrusted_node_ok(
 /// - reads from the newly created channel and succeeds (different from previous test case, thanks
 ///   to the newly added privilege)
 #[test]
-fn create_channel_with_more_confidential_label_from_public_node_with_privilege_ok() {
-    let tag_0 = oak_abi::label::authorization_bearer_token_hmac_tag(&[1, 1, 1]);
+fn create_channel_with_more_confidential_label_from_public_node_with_privilege_ok(
+        // todo: better to create a pair of labels? but we need to refer to the tag in 
+        // NodePrivilege - so not completely trivial.
+        tag_0 in arb_tag(),
+        bytes in any::<Vec<u8>>(),
+    ) {
     let initial_label = Label::public_untrusted();
     let more_confidential_label = Label {
         confidentiality_tags: vec![tag_0.clone()],
@@ -377,7 +382,7 @@ fn create_channel_with_more_confidential_label_from_public_node_with_privilege_o
             let (write_handle, read_handle) = result.unwrap();
 
             let message = NodeMessage {
-                bytes: vec![14, 12, 88],
+                bytes: bytes,
                 handles: vec![],
             };
 
@@ -397,7 +402,9 @@ fn create_channel_with_more_confidential_label_from_public_node_with_privilege_o
         }),
     );
 }
+}
 
+proptest!{
 /// Create a test Node with public confidentiality label and infinite privilege that:
 ///
 /// - creates a Channel with a more confidential label and succeeds (same as previous test case)
@@ -405,8 +412,12 @@ fn create_channel_with_more_confidential_label_from_public_node_with_privilege_o
 /// - reads from the newly created channel and succeeds (same as previous test case, this time
 ///   thanks to the infinite privilege)
 #[test]
-fn create_channel_with_more_confidential_label_from_public_node_with_top_privilege_ok() {
-    let tag_0 = oak_abi::label::authorization_bearer_token_hmac_tag(&[1, 1, 1]);
+fn create_channel_with_more_confidential_label_from_public_node_with_top_privilege_ok(
+        // todo: better to create a pair of labels? but we need to refer to the tag in 
+        // NodePrivilege - so not completely trivial.
+        tag_0 in arb_tag(),
+        bytes in any::<Vec<u8>>(),
+    ) {
     let initial_label = Label::public_untrusted();
     let more_confidential_label = Label {
         confidentiality_tags: vec![tag_0],
@@ -422,7 +433,7 @@ fn create_channel_with_more_confidential_label_from_public_node_with_top_privile
             let (write_handle, read_handle) = result.unwrap();
 
             let message = NodeMessage {
-                bytes: vec![14, 12, 88],
+                bytes: bytes,
                 handles: vec![],
             };
 
@@ -442,11 +453,18 @@ fn create_channel_with_more_confidential_label_from_public_node_with_top_privile
         }),
     );
 }
+}
 
+// proptest!{
 #[test]
 fn create_channel_with_more_confidential_label_from_non_public_node_with_privilege_err() {
     let tag_0 = oak_abi::label::authorization_bearer_token_hmac_tag(&[1, 1, 1]);
     let tag_1 = oak_abi::label::authorization_bearer_token_hmac_tag(&[2, 2, 2]);
+// fn create_channel_with_more_confidential_label_from_non_public_node_with_privilege_err(
+//         tag_0 in arb_tag(),
+//         tag_1 in arb_tag(),
+//     ) {
+//    prop_assume!(tag_0 != tag_1);
     let initial_label = Label {
         confidentiality_tags: vec![tag_0.clone()],
         integrity_tags: vec![],
@@ -463,11 +481,15 @@ fn create_channel_with_more_confidential_label_from_non_public_node_with_privile
         },
         Box::new(move |runtime| {
             let result = runtime.channel_create("", &more_confidential_label);
+            // todo: this assertion is NOT being recognized as a failure of
+            // the test. WTF!
             assert_eq!(Err(OakStatus::ErrPermissionDenied), result);
+            assert_eq!(1, 2);
             Ok(())
         }),
     );
 }
+// }
 
 /// Create a test Node that creates a Node with the same public untrusted label and succeeds.
 #[test]
