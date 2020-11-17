@@ -272,6 +272,8 @@ fn create_channel_less_confidential_label_no_privilege_err(
         tag_0 in arb_tag(),
         tag_1 in arb_tag(), // todo: probably need tag_0 != tag_1
     ) {
+    // todo: it would be better to use two arbitrary labels instead of two arbitrary tags?
+    // todo: should use an arbitrary set of integrity tags
     let initial_label = Label {
         confidentiality_tags: vec![tag_0.clone(), tag_1.clone()],
         integrity_tags: vec![],
