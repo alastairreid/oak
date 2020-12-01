@@ -174,9 +174,22 @@ fn arb_tag() -> impl Strategy<Value = Tag> {
     ]
 }
 
+fn arb_tags(size: core::ops::Range<usize>) -> impl Strategy<Value = Vec<Tag>> {
+    prop::collection::vec(arb_tag(), size)
+}
+
+fn arb_label(size: core::ops::Range<usize>) -> impl Strategy<Value = Label> {
+    arb_tags(size).prop_map(|tags|
+        Label {
+            confidentiality_tags: tags,
+            integrity_tags: vec![],
+        }
+    )
+}
+
 // generate a label with an arbitrary (non-empty) list of confidentiality tags
 // and no integrity tags
-fn arb_label() -> impl Strategy<Value = Label> {
+fn arb_auth_label() -> impl Strategy<Value = Label> {
     // let ctags = prop::collection::vec(arb_authentication_tag(), 1..2); // must be non-empty
     let ctag = arb_authentication_tag();
     ctag.prop_map(|c|
@@ -208,7 +221,7 @@ proptest!{
 ///
 /// Only Nodes with a public confidentiality label may create other Nodes and Channels.
 #[test]
-fn create_channel_same_label_err(label in arb_label()) {
+fn create_channel_same_label_err(label in arb_auth_label()) {
     let label_clone = label.clone();
     run_node_body(
         &label,
@@ -750,15 +763,13 @@ fn wait_on_channels_immediately_returns_if_the_input_list_is_empty() {
 
 proptest!{
 #[test]
+/// The top privilege can downgrade any label to "public".
 fn downgrade_one_label_using_top_privilege(
-        tag in arb_tag(),
+        label in arb_tag().prop_map(confidentiality_label),
     ) {
     init_logging();
-    let top_privilege = NodePrivilege::top_privilege();
-    let label = confidentiality_label(tag.clone());
 
-    // The top privilege can downgrade any label to "public".
-    assert!(top_privilege
+    assert!(NodePrivilege::top_privilege()
         .downgrade_label(&label)
         .flows_to(&Label::public_untrusted()));
 }
@@ -766,19 +777,12 @@ fn downgrade_one_label_using_top_privilege(
 
 proptest!{
 #[test]
+/// The top privilege can downgrade any label to "public".
 fn downgrade_multiple_labels_using_top_privilege(
-        tags in prop::collection::vec(arb_tag(), 0..10),
+        mixed_label in arb_label(0..10),
     ) {
     init_logging();
-    let top_privilege = NodePrivilege::top_privilege();
-
-    let mixed_label = Label {
-        confidentiality_tags: tags,
-        integrity_tags: vec![],
-    };
-
-    // The top privilege can downgrade any label to "public".
-    assert!(top_privilege
+    assert!(NodePrivilege::top_privilege()
         .downgrade_label(&mixed_label)
         .flows_to(&Label::public_untrusted()));
 }
@@ -826,15 +830,13 @@ proptest!{
 #[test]
 fn downgrade_wasm_label_using_signature_privilege_does_not_do_anything(
         signature_tag in arb_wasm_module_signature_tag(),
-        wasm_tag in arb_wasm_module_tag(),
+        wasm_label in arb_wasm_module_tag().prop_map(confidentiality_label),
     ) {
     init_logging();
     let signature_privilege = NodePrivilege {
         can_declassify_confidentiality_tags: hashset! { signature_tag },
         can_endorse_integrity_tags: hashset! {},
     };
-
-    let wasm_label = confidentiality_label(wasm_tag);
 
     // Signature privilege cannot downgrade a Wasm confidentiality label.
     assert!(!signature_privilege
