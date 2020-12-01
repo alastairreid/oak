@@ -809,10 +809,7 @@ fn downgrade_tls_label_using_tls_privilege(
 
     let tls_endpoint_label_1 = confidentiality_label(tls_endpoint_tag_1.clone());
     let tls_endpoint_label_2 = confidentiality_label(tls_endpoint_tag_2.clone());
-    let mixed_tls_endpoint_label = Label {
-        confidentiality_tags: vec![tls_endpoint_tag_1, tls_endpoint_tag_2],
-        integrity_tags: vec![],
-    };
+    let mixed_tls_endpoint_label = lub_label(&tls_endpoint_label_1, &tls_endpoint_label_2);
 
     // Can downgrade the label with the same TLS endpoint tag.
     assert!(tls_privilege
