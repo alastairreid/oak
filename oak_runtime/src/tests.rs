@@ -767,52 +767,17 @@ fn downgrade_one_label_using_top_privilege(
 proptest!{
 #[test]
 fn downgrade_multiple_labels_using_top_privilege(
-        // note: original test used the same byte sequence for all tags but this did not seem
-        // to be necessary or desirable in the test
-        //
-        // todo: could express as "for any tag, can downgrade"
-        // and "for any set of tags, can downgrade"
-        wasm_tag in arb_wasm_module_tag(),
-        signature_tag in arb_wasm_module_signature_tag(),
-        bearer_token_tag in arb_authentication_tag(),
-        public_key_identity_tag in arb_public_key_identity_tag(),
-        tls_endpoint_tag in arb_tls_endpoint_tag(),
+        tags in prop::collection::vec(arb_tag(), 0..10),
     ) {
     init_logging();
     let top_privilege = NodePrivilege::top_privilege();
 
-    let wasm_label = confidentiality_label(wasm_tag.clone());
-    let signature_label = confidentiality_label(signature_tag.clone());
-    let bearer_token_label = confidentiality_label(bearer_token_tag.clone());
-    let public_key_identity_label = confidentiality_label(public_key_identity_tag.clone());
-    let tls_endpoint_label = confidentiality_label(tls_endpoint_tag.clone());
     let mixed_label = Label {
-        confidentiality_tags: vec![
-            wasm_tag,
-            signature_tag,
-            bearer_token_tag,
-            public_key_identity_tag,
-            tls_endpoint_tag,
-        ],
+        confidentiality_tags: tags,
         integrity_tags: vec![],
     };
 
     // The top privilege can downgrade any label to "public".
-    assert!(top_privilege
-        .downgrade_label(&wasm_label)
-        .flows_to(&Label::public_untrusted()));
-    assert!(top_privilege
-        .downgrade_label(&signature_label)
-        .flows_to(&Label::public_untrusted()));
-    assert!(top_privilege
-        .downgrade_label(&bearer_token_label)
-        .flows_to(&Label::public_untrusted()));
-    assert!(top_privilege
-        .downgrade_label(&public_key_identity_label)
-        .flows_to(&Label::public_untrusted()));
-    assert!(top_privilege
-        .downgrade_label(&tls_endpoint_label)
-        .flows_to(&Label::public_untrusted()));
     assert!(top_privilege
         .downgrade_label(&mixed_label)
         .flows_to(&Label::public_untrusted()));
