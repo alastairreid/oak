@@ -164,6 +164,15 @@ fn arb_tls_endpoint_tag() -> impl Strategy<Value = Tag> {
         .prop_map(|authority| tls_endpoint_tag(&authority)).boxed()
 }
 
+fn arb_tag() -> impl Strategy<Value = Tag> {
+    prop_oneof![
+        arb_wasm_module_tag(),
+        arb_wasm_module_signature_tag(),
+        arb_authentication_tag(),
+        arb_public_key_identity_tag(),
+        arb_tls_endpoint_tag(),
+    ]
+}
 
 // generate a label with an arbitrary (non-empty) list of confidentiality tags
 // and no integrity tags
@@ -737,6 +746,22 @@ fn wait_on_channels_immediately_returns_if_the_input_list_is_empty() {
             Ok(())
         }),
     );
+}
+
+proptest!{
+#[test]
+fn downgrade_one_label_using_top_privilege(
+        tag in arb_tag(),
+    ) {
+    init_logging();
+    let top_privilege = NodePrivilege::top_privilege();
+    let label = confidentiality_label(tag.clone());
+
+    // The top privilege can downgrade any label to "public".
+    assert!(top_privilege
+        .downgrade_label(&label)
+        .flows_to(&Label::public_untrusted()));
+}
 }
 
 proptest!{
