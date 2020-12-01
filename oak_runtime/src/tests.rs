@@ -135,7 +135,7 @@ fn test_label() -> Label {
     }
 }
 
-fn arb_tag() -> impl Strategy<Value = Tag> {
+fn arb_authentication_tag() -> impl Strategy<Value = Tag> {
     any::<Vec<u8>>()
         .prop_filter("hmacs must be non-empty", |hmac| !hmac.is_empty())
         .prop_map(|hmac| authorization_bearer_token_hmac_tag(&hmac)).boxed()
@@ -168,8 +168,8 @@ fn arb_tls_endpoint_tag() -> impl Strategy<Value = Tag> {
 // generate a label with an arbitrary (non-empty) list of confidentiality tags
 // and no integrity tags
 fn arb_label() -> impl Strategy<Value = Label> {
-    // let ctags = prop::collection::vec(arb_tag(), 1..2); // must be non-empty
-    let ctag = arb_tag();
+    // let ctags = prop::collection::vec(arb_authentication_tag(), 1..2); // must be non-empty
+    let ctag = arb_authentication_tag();
     ctag.prop_map(|c|
         Label {
             confidentiality_tags: vec![c],
@@ -221,7 +221,7 @@ proptest!{
 ///
 /// Only Nodes with a public confidentiality label may create other Nodes and Channels.
 #[test]
-fn create_channel_less_confidential_label_err(tag_0 in arb_tag(), tag_1 in arb_tag()) {
+fn create_channel_less_confidential_label_err(tag_0 in arb_authentication_tag(), tag_1 in arb_authentication_tag()) {
     // todo: could make this better by replacing tag_1 with a list of tags
     // todo: is it worth having a strategy for generating a label strictly
     //       weaker than some other strategy
@@ -252,9 +252,9 @@ proptest!{
 /// Only Nodes with a public confidentiality label may create other Nodes and Channels.
 #[test]
 fn create_channel_less_confidential_label_declassification_err(
-        tag_0 in arb_tag(),
-        tag_1 in arb_tag(),
-        other_tag in arb_tag(), // todo: probably != tag_0/1
+        tag_0 in arb_authentication_tag(),
+        tag_1 in arb_authentication_tag(),
+        other_tag in arb_authentication_tag(), // todo: probably != tag_0/1
     ) {
     let initial_label = Label {
         confidentiality_tags: vec![tag_0.clone(), tag_1.clone()],
@@ -294,8 +294,8 @@ proptest!{
 /// Only Nodes with a public confidentiality label may create other Nodes and Channels.
 #[test]
 fn create_channel_less_confidential_label_no_privilege_err(
-        tag_0 in arb_tag(),
-        tag_1 in arb_tag(), // todo: probably need tag_0 != tag_1
+        tag_0 in arb_authentication_tag(),
+        tag_1 in arb_authentication_tag(), // todo: probably need tag_0 != tag_1
     ) {
     // todo: it would be better to use two arbitrary labels instead of two arbitrary tags?
     // todo: should use an arbitrary set of integrity tags
@@ -334,7 +334,7 @@ proptest!{
 /// Data is always allowed to flow to more confidential labels.
 #[test]
 fn create_channel_with_more_confidential_label_from_public_untrusted_node_ok(
-        tag_0 in arb_tag(),
+        tag_0 in arb_authentication_tag(),
         bytes in any::<Vec<u8>>(),
     ) {
     // todo: better to generate a pair of arbitrary labels than just a tag
@@ -386,7 +386,7 @@ proptest!{
 fn create_channel_with_more_confidential_label_from_public_node_with_privilege_ok(
         // todo: better to create a pair of labels? but we need to refer to the tag in 
         // NodePrivilege - so not completely trivial.
-        tag_0 in arb_tag(),
+        tag_0 in arb_authentication_tag(),
         bytes in any::<Vec<u8>>(),
     ) {
     let initial_label = Label::public_untrusted();
@@ -440,7 +440,7 @@ proptest!{
 fn create_channel_with_more_confidential_label_from_public_node_with_top_privilege_ok(
         // todo: better to create a pair of labels? but we need to refer to the tag in 
         // NodePrivilege - so not completely trivial.
-        tag_0 in arb_tag(),
+        tag_0 in arb_authentication_tag(),
         bytes in any::<Vec<u8>>(),
     ) {
     let initial_label = Label::public_untrusted();
@@ -483,8 +483,8 @@ fn create_channel_with_more_confidential_label_from_public_node_with_top_privile
 proptest!{
 #[test]
 fn create_channel_with_more_confidential_label_from_non_public_node_with_privilege_err(
-        tag_0 in arb_tag(),
-        tag_1 in arb_tag(),
+        tag_0 in arb_authentication_tag(),
+        tag_1 in arb_authentication_tag(),
     ) {
     prop_assume!(tag_0 != tag_1);
     let initial_label = Label {
@@ -556,8 +556,8 @@ proptest!{
 /// of any sort, regardless of label.
 #[test]
 fn create_channel_by_nonpublic_node_err(
-        tag_0 in arb_tag(),
-        tag_1 in arb_tag(),
+        tag_0 in arb_authentication_tag(),
+        tag_1 in arb_authentication_tag(),
     ) {
     prop_assume!(tag_0 != tag_1);
     let initial_label = Label {
@@ -594,8 +594,8 @@ proptest!{
 /// succeeds.
 #[test]
 fn create_node_more_confidential_label_ok(
-        tag_0 in arb_tag(),
-        tag_1 in arb_tag(),
+        tag_0 in arb_authentication_tag(),
+        tag_1 in arb_authentication_tag(),
     ) {
     prop_assume!(tag_0 != tag_1);
     let initial_label = Label::public_untrusted();
@@ -749,7 +749,7 @@ fn downgrade_multiple_labels_using_top_privilege(
         // and "for any set of tags, can downgrade"
         wasm_tag in arb_wasm_module_tag(),
         signature_tag in arb_wasm_module_signature_tag(),
-        bearer_token_tag in arb_tag(),
+        bearer_token_tag in arb_authentication_tag(),
         public_key_identity_tag in arb_public_key_identity_tag(),
         tls_endpoint_tag in arb_tls_endpoint_tag(),
     ) {
