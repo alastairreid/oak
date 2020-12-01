@@ -199,6 +199,22 @@ fn arb_auth_label() -> impl Strategy<Value = Label> {
         }).boxed()
 }
 
+/// generate two strictly ordered labels
+fn arb_auth_labels_ordered_2() -> impl Strategy<Value = (Label, Label)> {
+    prop_oneof![
+        // todo: check labels not ordered
+        (arb_auth_label(), arb_auth_label())
+            .prop_filter("labels not distinct", |(l1, l2)| l1 != l2) // todo: should use flowsto
+            .prop_flat_map(|(l1, l2)| {
+                let l2 = lub_label(&l1, &l2);
+                (Just(l1), Just(l2))
+            }),
+        (arb_auth_label(), Just(top_label())),
+        (Just(bottom_label()), arb_auth_label()),
+        (Just(bottom_label()), Just(top_label())),
+    ]
+}
+
 fn arb_message() -> impl Strategy<Value = NodeMessage> {
     any::<Vec<u8>>()
         .prop_map(|bytes|
@@ -214,6 +230,13 @@ fn lub_label(x: &Label, y: &Label) -> Label {
     Label {
         confidentiality_tags: [x.confidentiality_tags.clone(), y.confidentiality_tags.clone()].concat(),
         integrity_tags: [x.integrity_tags.clone(), y.integrity_tags.clone()].concat(),
+    }
+}
+
+fn top_label() -> Label {
+    Label {
+        confidentiality_tags: vec![top()],
+        integrity_tags: vec![],
     }
 }
 
@@ -271,14 +294,9 @@ proptest!{
 /// Only Nodes with a public confidentiality label may create other Nodes and Channels.
 #[test]
 fn create_channel_less_confidential_label_err(
-        label_0 in arb_auth_label(),
-        label_1 in arb_auth_label(),
+        (less_confidential_label, more_confidential_label) in arb_auth_labels_ordered_2(),
     ) {
-    // todo: could make this better by replacing tag_1 with a list of tags
-    // todo: is it worth having a strategy for generating a label strictly
-    //       weaker than some other strategy
-    let initial_label = lub_label(&label_0, &label_1);
-    let less_confidential_label = label_1;
+    let initial_label = more_confidential_label;
     run_node_body(
         &initial_label,
         &NodePrivilege::default(),
@@ -582,6 +600,9 @@ fn create_channel_by_nonpublic_node_err(
         label_1 in arb_auth_label(),
     ) {
     prop_assume!(label_0 != label_1); // todo: test using flowsto
+    // todo: this can be reduced to a single test: for any pair l1, l2, chan_create(l2) fails
+    // but, in doing so, need a non-trivial chance that second label matches first
+    // and that either of the labels can be top or bottom
     let less_confidential_label = bottom_label();
     let more_confidential_label = lub_label(&label_0, &label_1);
     let initial_label = label_0;
@@ -605,15 +626,15 @@ fn create_channel_by_nonpublic_node_err(
 proptest!{
 /// Create a public_untrusted test Node that creates a Node with a more confidential label and
 /// succeeds.
+///
+/// todo: it is not clear whether it matters that the second node has a higher label
+/// or whether any arbitrary label should work provided they are all no lower than initial_label
 #[test]
 fn create_node_more_confidential_label_ok(
-        label_0 in arb_auth_label(),
-        label_1 in arb_auth_label(),
+        (more_confidential_label, even_more_confidential_label) in arb_auth_labels_ordered_2(),
     ) {
-    prop_assume!(label_0 != label_1); // todo: test using flowsto
+    prop_assume!(more_confidential_label != Label::public_untrusted()); // todo: test using flowsto
     let initial_label = Label::public_untrusted();
-    let more_confidential_label = label_0.clone();
-    let even_more_confidential_label = lub_label(&label_0, &label_1);
     let initial_label_clone = initial_label.clone();
     run_node_body(
         &initial_label,
