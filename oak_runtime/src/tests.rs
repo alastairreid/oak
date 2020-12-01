@@ -462,14 +462,10 @@ proptest!{
 fn create_channel_with_more_confidential_label_from_public_node_with_top_privilege_ok(
         // todo: better to create a pair of labels? but we need to refer to the tag in 
         // NodePrivilege - so not completely trivial.
-        tag_0 in arb_authentication_tag(),
+        more_confidential_label in arb_label(1..2),
         bytes in any::<Vec<u8>>(),
     ) {
     let initial_label = Label::public_untrusted();
-    let more_confidential_label = Label {
-        confidentiality_tags: vec![tag_0],
-        integrity_tags: vec![],
-    };
     run_node_body(
         &initial_label,
         &NodePrivilege::top_privilege(),
