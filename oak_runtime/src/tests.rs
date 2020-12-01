@@ -796,6 +796,8 @@ fn downgrade_multiple_labels_using_top_privilege(
 
 proptest!{
 #[test]
+/// todo: should this test be used on any pair of tags or only for TLS endpoint tags?
+/// todo: should this test be applied to arbitrary labels (not just labels based on individual tags)?
 fn downgrade_tls_label_using_tls_privilege(
         tls_endpoint_tag_1 in arb_tls_endpoint_tag(),
         tls_endpoint_tag_2 in arb_tls_endpoint_tag(),
