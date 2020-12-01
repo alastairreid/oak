@@ -136,7 +136,32 @@ fn test_label() -> Label {
 }
 
 fn arb_tag() -> impl Strategy<Value = Tag> {
-    any::<Vec<u8>>().prop_map(|hmac| authorization_bearer_token_hmac_tag(&hmac)).boxed()
+    any::<Vec<u8>>()
+        .prop_filter("hmacs must be non-empty", |hmac| !hmac.is_empty())
+        .prop_map(|hmac| authorization_bearer_token_hmac_tag(&hmac)).boxed()
+}
+
+fn arb_wasm_module_tag() -> impl Strategy<Value = Tag> {
+    any::<Vec<u8>>()
+        .prop_filter("shas must be non-empty", |sha| !sha.is_empty())
+        .prop_map(|sha| web_assembly_module_tag(&sha)).boxed()
+}
+
+fn arb_wasm_module_signature_tag() -> impl Strategy<Value = Tag> {
+    any::<Vec<u8>>()
+        .prop_filter("shas must be non-empty", |sha| !sha.is_empty())
+        .prop_map(|sha| web_assembly_module_signature_tag(&sha)).boxed()
+}
+
+fn arb_public_key_identity_tag() -> impl Strategy<Value = Tag> {
+    any::<Vec<u8>>()
+        .prop_filter("keys must be non-empty", |key| !key.is_empty())
+        .prop_map(|key| public_key_identity_tag(key)).boxed()
+}
+
+fn arb_tls_endpoint_tag() -> impl Strategy<Value = Tag> {
+   ".*" 
+        .prop_map(|authority| tls_endpoint_tag(&authority)).boxed()
 }
 
 
@@ -455,16 +480,13 @@ fn create_channel_with_more_confidential_label_from_public_node_with_top_privile
 }
 }
 
-// proptest!{
+proptest!{
 #[test]
-fn create_channel_with_more_confidential_label_from_non_public_node_with_privilege_err() {
-    let tag_0 = oak_abi::label::authorization_bearer_token_hmac_tag(&[1, 1, 1]);
-    let tag_1 = oak_abi::label::authorization_bearer_token_hmac_tag(&[2, 2, 2]);
-// fn create_channel_with_more_confidential_label_from_non_public_node_with_privilege_err(
-//         tag_0 in arb_tag(),
-//         tag_1 in arb_tag(),
-//     ) {
-//    prop_assume!(tag_0 != tag_1);
+fn create_channel_with_more_confidential_label_from_non_public_node_with_privilege_err(
+        tag_0 in arb_tag(),
+        tag_1 in arb_tag(),
+    ) {
+    prop_assume!(tag_0 != tag_1);
     let initial_label = Label {
         confidentiality_tags: vec![tag_0.clone()],
         integrity_tags: vec![],
@@ -481,15 +503,12 @@ fn create_channel_with_more_confidential_label_from_non_public_node_with_privile
         },
         Box::new(move |runtime| {
             let result = runtime.channel_create("", &more_confidential_label);
-            // todo: this assertion is NOT being recognized as a failure of
-            // the test. WTF!
             assert_eq!(Err(OakStatus::ErrPermissionDenied), result);
-            assert_eq!(1, 2);
             Ok(())
         }),
     );
 }
-// }
+}
 
 /// Create a test Node that creates a Node with the same public untrusted label and succeeds.
 #[test]
@@ -532,12 +551,15 @@ fn create_node_invalid_configuration_err() {
     );
 }
 
+proptest!{
 /// Create a test Node with a non public_trusted label, which is then unable to create channels
 /// of any sort, regardless of label.
 #[test]
-fn create_channel_by_nonpublic_node_err() {
-    let tag_0 = oak_abi::label::authorization_bearer_token_hmac_tag(&[1, 1, 1]);
-    let tag_1 = oak_abi::label::authorization_bearer_token_hmac_tag(&[2, 2, 2]);
+fn create_channel_by_nonpublic_node_err(
+        tag_0 in arb_tag(),
+        tag_1 in arb_tag(),
+    ) {
+    prop_assume!(tag_0 != tag_1);
     let initial_label = Label {
         confidentiality_tags: vec![tag_0.clone()],
         integrity_tags: vec![],
@@ -565,13 +587,17 @@ fn create_channel_by_nonpublic_node_err() {
         }),
     );
 }
+}
 
+proptest!{
 /// Create a public_untrusted test Node that creates a Node with a more confidential label and
 /// succeeds.
 #[test]
-fn create_node_more_confidential_label_ok() {
-    let tag_0 = oak_abi::label::authorization_bearer_token_hmac_tag(&[1, 1, 1]);
-    let tag_1 = oak_abi::label::authorization_bearer_token_hmac_tag(&[2, 2, 2]);
+fn create_node_more_confidential_label_ok(
+        tag_0 in arb_tag(),
+        tag_1 in arb_tag(),
+    ) {
+    prop_assume!(tag_0 != tag_1);
     let initial_label = Label::public_untrusted();
     let more_confidential_label = Label {
         confidentiality_tags: vec![tag_0.clone()],
@@ -589,6 +615,7 @@ fn create_node_more_confidential_label_ok() {
             let (_write_handle, read_handle) = runtime.channel_create("", &initial_label_clone)?;
             let node_configuration = NodeConfiguration {
                 config_type: Some(ConfigType::GrpcServerConfig(GrpcServerConfiguration {
+                    // todo: can/should we generalize this hardcoded string?
                     address: "[::]:6502".to_string(),
                 })),
             };
@@ -610,7 +637,12 @@ fn create_node_more_confidential_label_ok() {
         }),
     );
 }
+}
 
+// todo: what is the right way to generalize this?
+// perhaps generate a sequence of N channel creates
+// and a sequence of N bools to close them
+// and then check that only the closed ones are Orphaned
 #[test]
 fn wait_on_channels_immediately_returns_if_any_channel_is_orphaned() {
     let label = Label::public_untrusted();
@@ -707,16 +739,22 @@ fn wait_on_channels_immediately_returns_if_the_input_list_is_empty() {
     );
 }
 
+proptest!{
 #[test]
-fn downgrade_multiple_labels_using_top_privilege() {
+fn downgrade_multiple_labels_using_top_privilege(
+        // note: original test used the same byte sequence for all tags but this did not seem
+        // to be necessary or desirable in the test
+        //
+        // todo: could express as "for any tag, can downgrade"
+        // and "for any set of tags, can downgrade"
+        wasm_tag in arb_wasm_module_tag(),
+        signature_tag in arb_wasm_module_signature_tag(),
+        bearer_token_tag in arb_tag(),
+        public_key_identity_tag in arb_public_key_identity_tag(),
+        tls_endpoint_tag in arb_tls_endpoint_tag(),
+    ) {
     init_logging();
     let top_privilege = NodePrivilege::top_privilege();
-
-    let wasm_tag = web_assembly_module_tag(&[1, 2, 3]);
-    let signature_tag = web_assembly_module_signature_tag(&[1, 2, 3]);
-    let bearer_token_tag = authorization_bearer_token_hmac_tag(&[1, 2, 3]);
-    let public_key_identity_tag = public_key_identity_tag(vec![1, 2, 3]);
-    let tls_endpoint_tag = tls_endpoint_tag("google.com");
 
     let wasm_label = confidentiality_label(wasm_tag.clone());
     let signature_label = confidentiality_label(signature_tag.clone());
@@ -754,12 +792,16 @@ fn downgrade_multiple_labels_using_top_privilege() {
         .downgrade_label(&mixed_label)
         .flows_to(&Label::public_untrusted()));
 }
+}
 
+proptest!{
 #[test]
-fn downgrade_tls_label_using_tls_privilege() {
+fn downgrade_tls_label_using_tls_privilege(
+        tls_endpoint_tag_1 in arb_tls_endpoint_tag(),
+        tls_endpoint_tag_2 in arb_tls_endpoint_tag(),
+    ) {
+    prop_assume!(tls_endpoint_tag_1 != tls_endpoint_tag_2);
     init_logging();
-    let tls_endpoint_tag_1 = tls_endpoint_tag("google.com");
-    let tls_endpoint_tag_2 = tls_endpoint_tag("localhost");
     let tls_privilege = NodePrivilege {
         can_declassify_confidentiality_tags: hashset! { tls_endpoint_tag_1.clone() },
         can_endorse_integrity_tags: hashset! {},
@@ -788,21 +830,25 @@ fn downgrade_tls_label_using_tls_privilege() {
         .downgrade_label(&mixed_tls_endpoint_label)
         .flows_to(&tls_endpoint_label_1));
 }
+}
 
+proptest!{
 #[test]
-fn downgrade_wasm_label_using_signature_privilege_does_not_do_aything() {
+fn downgrade_wasm_label_using_signature_privilege_does_not_do_anything(
+        signature_tag in arb_wasm_module_signature_tag(),
+        wasm_tag in arb_wasm_module_tag(),
+    ) {
     init_logging();
-    let signature_tag = web_assembly_module_signature_tag(&[1, 2, 3]);
     let signature_privilege = NodePrivilege {
         can_declassify_confidentiality_tags: hashset! { signature_tag },
         can_endorse_integrity_tags: hashset! {},
     };
 
-    let wasm_tag = web_assembly_module_tag(&[1, 2, 3]);
     let wasm_label = confidentiality_label(wasm_tag);
 
     // Signature privilege cannot downgrade a Wasm confidentiality label.
     assert!(!signature_privilege
         .downgrade_label(&wasm_label)
         .flows_to(&Label::public_untrusted()));
+}
 }
