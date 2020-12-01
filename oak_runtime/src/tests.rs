@@ -199,6 +199,16 @@ fn arb_auth_label() -> impl Strategy<Value = Label> {
         }).boxed()
 }
 
+fn arb_message() -> impl Strategy<Value = NodeMessage> {
+    any::<Vec<u8>>()
+        .prop_map(|bytes|
+            NodeMessage {
+                bytes: bytes,
+                handles: vec![],
+            }
+        )
+}
+
 /// Checks that a panic in the node body actually causes the test case to fail, and does not
 /// accidentally get ignored.
 #[test]
@@ -221,7 +231,9 @@ proptest!{
 ///
 /// Only Nodes with a public confidentiality label may create other Nodes and Channels.
 #[test]
-fn create_channel_same_label_err(label in arb_auth_label()) {
+fn create_channel_same_label_err(
+        label in arb_auth_label(),
+    ) {
     let label_clone = label.clone();
     run_node_body(
         &label,
@@ -317,8 +329,9 @@ proptest!{
 #[test]
 fn create_channel_less_confidential_label_no_privilege_err(
         tag_0 in arb_authentication_tag(),
-        tag_1 in arb_authentication_tag(), // todo: probably need tag_0 != tag_1
+        tag_1 in arb_authentication_tag(),
     ) {
+    prop_assume!(tag_0 != tag_1);
     // todo: it would be better to use two arbitrary labels instead of two arbitrary tags?
     // todo: should use an arbitrary set of integrity tags
     let initial_label = Label {
@@ -357,7 +370,7 @@ proptest!{
 #[test]
 fn create_channel_with_more_confidential_label_from_public_untrusted_node_ok(
         tag_0 in arb_authentication_tag(),
-        bytes in any::<Vec<u8>>(),
+        message in arb_message(),
     ) {
     // todo: better to generate a pair of arbitrary labels than just a tag
     let initial_label = &Label::public_untrusted();
@@ -373,11 +386,6 @@ fn create_channel_with_more_confidential_label_from_public_untrusted_node_ok(
             assert_eq!(true, result.is_ok());
 
             let (write_handle, read_handle) = result.unwrap();
-
-            let message = NodeMessage {
-                bytes: bytes,
-                handles: vec![],
-            };
 
             {
                 // Writing to a more confidential Channel is always allowed.
@@ -409,7 +417,7 @@ fn create_channel_with_more_confidential_label_from_public_node_with_privilege_o
         // todo: better to create a pair of labels? but we need to refer to the tag in 
         // NodePrivilege - so not completely trivial.
         tag_0 in arb_authentication_tag(),
-        bytes in any::<Vec<u8>>(),
+        message in arb_message(),
     ) {
     let initial_label = Label::public_untrusted();
     let more_confidential_label = Label {
@@ -427,11 +435,6 @@ fn create_channel_with_more_confidential_label_from_public_node_with_privilege_o
             assert_eq!(true, result.is_ok());
 
             let (write_handle, read_handle) = result.unwrap();
-
-            let message = NodeMessage {
-                bytes: bytes,
-                handles: vec![],
-            };
 
             {
                 // Writing to a more confidential Channel is always allowed.
@@ -463,7 +466,7 @@ fn create_channel_with_more_confidential_label_from_public_node_with_top_privile
         // todo: better to create a pair of labels? but we need to refer to the tag in 
         // NodePrivilege - so not completely trivial.
         more_confidential_label in arb_label(1..2),
-        bytes in any::<Vec<u8>>(),
+        message in arb_message(),
     ) {
     let initial_label = Label::public_untrusted();
     run_node_body(
@@ -474,11 +477,6 @@ fn create_channel_with_more_confidential_label_from_public_node_with_top_privile
             assert_eq!(true, result.is_ok());
 
             let (write_handle, read_handle) = result.unwrap();
-
-            let message = NodeMessage {
-                bytes: bytes,
-                handles: vec![],
-            };
 
             {
                 // Writing to a more confidential Channel is always allowed.
