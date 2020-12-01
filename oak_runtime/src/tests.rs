@@ -209,6 +209,21 @@ fn arb_message() -> impl Strategy<Value = NodeMessage> {
         )
 }
 
+/// Form lub of two labels
+fn lub_label(x: &Label, y: &Label) -> Label {
+    Label {
+        confidentiality_tags: [x.confidentiality_tags.clone(), y.confidentiality_tags.clone()].concat(),
+        integrity_tags: [x.integrity_tags.clone(), y.integrity_tags.clone()].concat(),
+    }
+}
+
+fn bottom_label() -> Label {
+    Label {
+        confidentiality_tags: vec![],
+        integrity_tags: vec![],
+    }
+}
+
 /// Checks that a panic in the node body actually causes the test case to fail, and does not
 /// accidentally get ignored.
 #[test]
@@ -255,18 +270,15 @@ proptest!{
 ///
 /// Only Nodes with a public confidentiality label may create other Nodes and Channels.
 #[test]
-fn create_channel_less_confidential_label_err(tag_0 in arb_authentication_tag(), tag_1 in arb_authentication_tag()) {
+fn create_channel_less_confidential_label_err(
+        label_0 in arb_auth_label(),
+        label_1 in arb_auth_label(),
+    ) {
     // todo: could make this better by replacing tag_1 with a list of tags
     // todo: is it worth having a strategy for generating a label strictly
     //       weaker than some other strategy
-    let initial_label = Label {
-        confidentiality_tags: vec![tag_0, tag_1.clone()],
-        integrity_tags: vec![],
-    };
-    let less_confidential_label = Label {
-        confidentiality_tags: vec![tag_1],
-        integrity_tags: vec![],
-    };
+    let initial_label = lub_label(&label_0, &label_1);
+    let less_confidential_label = label_1;
     run_node_body(
         &initial_label,
         &NodePrivilege::default(),
@@ -329,19 +341,16 @@ proptest!{
 #[test]
 fn create_channel_less_confidential_label_no_privilege_err(
         tag_0 in arb_authentication_tag(),
-        tag_1 in arb_authentication_tag(),
+        label_1 in arb_auth_label(),
     ) {
-    prop_assume!(tag_0 != tag_1);
+    prop_assume!(!label_1.confidentiality_tags.contains(&tag_0));
     // todo: it would be better to use two arbitrary labels instead of two arbitrary tags?
     // todo: should use an arbitrary set of integrity tags
-    let initial_label = Label {
-        confidentiality_tags: vec![tag_0.clone(), tag_1.clone()],
-        integrity_tags: vec![],
-    };
-    let less_confidential_label = Label {
-        confidentiality_tags: vec![tag_1],
-        integrity_tags: vec![],
-    };
+    let initial_label = lub_label(&label_1, &Label {
+            confidentiality_tags: vec![tag_0.clone()],
+            integrity_tags: vec![],
+        });
+    let less_confidential_label = label_1;
     run_node_body(
         &initial_label,
         // Grant this node the privilege to endorse (rather than declassify) `tag_0`, which in this
@@ -369,15 +378,12 @@ proptest!{
 /// Data is always allowed to flow to more confidential labels.
 #[test]
 fn create_channel_with_more_confidential_label_from_public_untrusted_node_ok(
-        tag_0 in arb_authentication_tag(),
+        label_0 in arb_auth_label(),
         message in arb_message(),
     ) {
     // todo: better to generate a pair of arbitrary labels than just a tag
     let initial_label = &Label::public_untrusted();
-    let more_confidential_label = Label {
-        confidentiality_tags: vec![tag_0],
-        integrity_tags: vec![],
-    };
+    let more_confidential_label = label_0;
     run_node_body(
         &initial_label,
         &NodePrivilege::default(),
@@ -572,22 +578,13 @@ proptest!{
 /// of any sort, regardless of label.
 #[test]
 fn create_channel_by_nonpublic_node_err(
-        tag_0 in arb_authentication_tag(),
-        tag_1 in arb_authentication_tag(),
+        label_0 in arb_auth_label(),
+        label_1 in arb_auth_label(),
     ) {
-    prop_assume!(tag_0 != tag_1);
-    let initial_label = Label {
-        confidentiality_tags: vec![tag_0.clone()],
-        integrity_tags: vec![],
-    };
-    let less_confidential_label = Label {
-        confidentiality_tags: vec![],
-        integrity_tags: vec![],
-    };
-    let more_confidential_label = Label {
-        confidentiality_tags: vec![tag_0, tag_1],
-        integrity_tags: vec![],
-    };
+    prop_assume!(label_0 != label_1); // todo: test using flowsto
+    let less_confidential_label = bottom_label();
+    let more_confidential_label = lub_label(&label_0, &label_1);
+    let initial_label = label_0;
     let initial_label_clone = initial_label.clone();
     run_node_body(
         &initial_label,
@@ -610,19 +607,13 @@ proptest!{
 /// succeeds.
 #[test]
 fn create_node_more_confidential_label_ok(
-        tag_0 in arb_authentication_tag(),
-        tag_1 in arb_authentication_tag(),
+        label_0 in arb_auth_label(),
+        label_1 in arb_auth_label(),
     ) {
-    prop_assume!(tag_0 != tag_1);
+    prop_assume!(label_0 != label_1); // todo: test using flowsto
     let initial_label = Label::public_untrusted();
-    let more_confidential_label = Label {
-        confidentiality_tags: vec![tag_0.clone()],
-        integrity_tags: vec![],
-    };
-    let even_more_confidential_label = Label {
-        confidentiality_tags: vec![tag_0, tag_1],
-        integrity_tags: vec![],
-    };
+    let more_confidential_label = label_0.clone();
+    let even_more_confidential_label = lub_label(&label_0, &label_1);
     let initial_label_clone = initial_label.clone();
     run_node_body(
         &initial_label,
