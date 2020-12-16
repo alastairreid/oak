@@ -759,6 +759,7 @@ dependencies = [
  "oak_utils",
  "proptest",
  "proptest-derive",
+ "propverify",
  "prost",
  "prost-build",
  "prost-types",
@@ -872,6 +873,8 @@ name = "oak_utils"
 version = "0.1.0"
 dependencies = [
  "proc-macro2 1.0.24",
+ "proptest",
+ "propverify",
  "prost",
  "prost-build",
  "quote 1.0.7",
@@ -1106,6 +1109,13 @@ dependencies = [
  "proc-macro2 0.4.30",
  "quote 0.6.13",
  "syn 0.15.44",
+]
+
+[[package]]
+name = "propverify"
+version = "0.1.0"
+dependencies = [
+ "verification-annotations",
 ]
 
 [[package]]
@@ -2005,6 +2015,10 @@ name = "vec_map"
 version = "0.8.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f1bddf1187be692e79c5ffeab891132dfb0f236ed36a43c7ed39f1165ee20191"
+
+[[package]]
+name = "verification-annotations"
+version = "0.1.0"
 
 [[package]]
 name = "version_check"
