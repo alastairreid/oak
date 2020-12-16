@@ -15,12 +15,26 @@
 //
 
 use super::*;
+#[cfg(not(verify))]
 use proptest::prelude::*;
+#[cfg(verify)]
+use propverify::prelude::*;
+
+fn arb_hmac() -> impl Strategy<Value = Vec<u8>> {
+    prop::collection::vec(any::<u8>(), 5)
+        .prop_filter("hmacs must be non-empty", |hmac| !hmac.is_empty())
+}
+
+// todo: should probably vary number of hmacs from 0 upwards
+fn arb_hmacs() -> impl Strategy<Value = Vec<Vec<u8>>> {
+    prop::collection::vec(arb_hmac(), 3)
+}
 
 proptest! {
     #[test]
-    fn serialize_deserialize(c_hmacs in any::<Vec<Vec<u8>>>(),
-                             i_hmacs in any::<Vec<Vec<u8>>>()) {
+    fn serialize_deserialize(c_hmacs in arb_hmacs(),
+                             i_hmacs in arb_hmacs(),
+        ) {
         let ctags = c_hmacs.into_iter().map(|hmac| authorization_bearer_token_hmac_tag(&hmac)).collect();
         let itags = i_hmacs.into_iter().map(|hmac| authorization_bearer_token_hmac_tag(&hmac)).collect();
         let label = Label {
@@ -35,8 +49,9 @@ proptest! {
 
 proptest! {
   #[test]
-  fn label_flow(hmac_0 in any::<Vec<u8>>(),
-                hmac_1 in any::<Vec<u8>>()) {
+  fn label_flow(hmac_0 in arb_hmac(),
+                hmac_1 in arb_hmac(),
+      ) {
     let tag_0 = authorization_bearer_token_hmac_tag(&hmac_0);
     let tag_1 = authorization_bearer_token_hmac_tag(&hmac_1);
 
